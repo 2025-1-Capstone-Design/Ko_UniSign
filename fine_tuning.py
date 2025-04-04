@@ -125,7 +125,7 @@ def main(args):
         
         train_stats = train_one_epoch(args, model, train_dataloader, optimizer, epoch)
 
-        if args.output_dir:
+        if args.output_dir and (epoch%args.save_interval_epoch==0 or epoch==args.epochs-1): #save interval or last epoch
             checkpoint_paths = [output_dir / f'checkpoint_{epoch}.pth']
             for checkpoint_path in checkpoint_paths:
                 utils.save_on_master({

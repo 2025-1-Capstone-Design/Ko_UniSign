@@ -5,6 +5,7 @@ import torch.utils.checkpoint
 import contextlib
 import torchvision
 from einops import rearrange
+import torch.nn.functional as F
 
 import math
 from stgcn_layers import Graph, get_stgcn_chain
@@ -12,6 +13,67 @@ from deformable_attention_2d import DeformableAttention2D
 from transformers import MT5ForConditionalGeneration, T5Tokenizer 
 import warnings
 from config import mt5_path
+
+# in-batch negative contrastive learning
+
+def compute_info_nce_loss(features, labels, temperature=0.07, is_normalize=True):
+    """
+    features: Tensor of shape (B, D)
+    labels:   Tensor of shape (B,) -- 각 샘플의 label (예: 해시값 등)
+    temperature: 스케일링 인자
+
+    각 샘플 i에 대해, 
+      - positive set: labels가 동일한 모든 샘플 (자기 자신 포함)
+      - negative set: labels가 다른 샘플들
+    를 구성하여 아래와 같이 loss를 계산합니다.
+
+      loss_i = - log (sum_{j in positive}(exp(sim(i, j))) / sum_{k in valid}(exp(sim(i, k))))
+      
+    단, positive가 하나도 없는 샘플은 loss 계산에서 제외합니다.
+    """
+    device = features.device
+    B = features.size(0)
+    
+    if is_normalize:
+        features = F.normalize(features,p=2,dim=1)
+    
+    labels = labels.to(device)
+    
+    # (B, B) 크기의 유사도 행렬 계산 (dot product에 temperature scaling 적용)
+    sim = torch.matmul(features, features.T) / temperature
+    
+    # 수치적 안정성을 위해 각 행의 최대값을 빼줌
+    sim_max, _ = torch.max(sim, dim=1, keepdim=True)
+    sim = sim - sim_max.detach()
+    
+    # labels를 비교하여, positive와 negative 마스크 생성
+    # positive: 같은 label을 가진 모든 샘플 (자기 자신 포함)
+    positive_mask = (labels.unsqueeze(0) == labels.unsqueeze(1))
+    # negative: label이 다른 경우
+    negative_mask = (labels.unsqueeze(0) != labels.unsqueeze(1))
+    
+    # exp(similarity) 계산
+    exp_sim = torch.exp(sim)
+    
+    # 각 샘플에 대해 positive와 negative 항들의 합을 계산
+    pos_sum = (exp_sim * positive_mask.float()).sum(dim=1)
+    neg_sum = (exp_sim * negative_mask.float()).sum(dim=1)
+    total = pos_sum + neg_sum  # valid 후보: positive와 negative 모두 포함
+    
+    # positive가 존재하는 샘플만 loss에 반영 (없으면 NaN이 될 수 있으므로)
+    valid = pos_sum > 0
+    loss = torch.zeros(B, device=device)
+    loss[valid] = -torch.log(pos_sum[valid] / total[valid])
+    
+    # 유효한 샘플에 대해 평균 loss 계산 (유효 샘플이 없으면 0 반환)
+    if valid.sum() > 0:
+        loss = loss[valid].mean()
+    else:
+        loss = torch.tensor(0.0, device=device)
+    
+    return loss
+
+
 
 def _no_grad_trunc_normal_(tensor, mean, std, a, b):
     # Cut & paste from PyTorch official master until it's in a few official releases - RW
@@ -103,6 +165,8 @@ class Uni_Sign(nn.Module):
         
         if "CSL" in self.args.dataset:
             self.lang = 'Chinese'
+        elif "KO" in self.args.dataset: #--------------- MODIFIED ---------#
+            self.lang = "Korean"
         else:
             self.lang = 'English'
         
@@ -219,7 +283,7 @@ class Uni_Sign(nn.Module):
         body_feat = None
         for part in self.modes:
             # project position to hidden dim
-            proj_feat = self.proj_linear[part](src_input[part]).permute(0,3,1,2) #B,C,T,V
+            proj_feat = self.proj_linear[part](src_input[part]).permute(0,3,1,2) #B,C,T,V    | B,T,V,3 -> B,T,V,C
             # spatial gcn forward
             gcn_feat = self.gcn_modules[part](proj_feat)
             if part == 'body':
@@ -263,8 +327,18 @@ class Uni_Sign(nn.Module):
             features.append(pool_feat)
         
         # concat sub-pose feature across token dimension
-        inputs_embeds = torch.cat(features, dim=-1) + self.part_para
-        inputs_embeds = self.pose_proj(inputs_embeds)
+        inputs_embeds = torch.cat(features, dim=-1) + self.part_para #[B,T,C*P]
+        inputs_embeds = self.pose_proj(inputs_embeds) #[B,T,C*P] -> [B,T,768]
+
+        loss_nce = 0.0
+        #------------- ADD IN-BATCH-NEGATIVE ------------------------#
+        labels = torch.tensor([hash(sent) for sent in tgt_input['gt_sentence']])  #chck whether same word in batch
+        inputs_embeds_pooled = inputs_embeds.mean(dim=1)  # [B, D]
+        loss_nce = compute_info_nce_loss(features=inputs_embeds_pooled, 
+                                     labels=labels)
+        #print(loss_nce) #using self negative loss is zero
+        #------------------------------------------------------------#
+
 
         prefix_token = self.mt5_tokenizer(
                                 [f"Translate sign language video to {self.lang}: "] * len(tgt_input["gt_sentence"]),
@@ -304,7 +378,7 @@ class Uni_Sign(nn.Module):
             # use for inference
             'inputs_embeds':inputs_embeds,
             'attention_mask':attention_mask,
-            'loss':loss,
+            'loss':loss + loss_nce,
         }
 
         return stack_out

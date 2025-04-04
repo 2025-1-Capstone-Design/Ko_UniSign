@@ -441,6 +441,8 @@ def set_seed(seed):
 
 def get_args_parser():
     parser = argparse.ArgumentParser('Uni-Sign scripts', add_help=False)
+    parser.add_argument('--save_interval_epoch', default=4, type=int)
+
     parser.add_argument('--batch-size', default=16, type=int)
     parser.add_argument('--gradient-accumulation-steps', default=8, type=int)
     parser.add_argument('--gradient-clipping', default=1., type=float)
@@ -523,7 +525,7 @@ def get_args_parser():
     parser.add_argument("--max_length", default=256, type=int)
     
     # select dataset
-    parser.add_argument("--dataset", default="CSL_Daily", choices=['CSL_News', "CSL_Daily", "WLASL"])
+    parser.add_argument("--dataset", default="CSL_Daily", choices=['CSL_News', "CSL_Daily", "WLASL", 'KO_WORD_SYN','KO_SEN_SYN','KO_SEN_REAL'])
     
     # select task
     parser.add_argument("--task", default="SLT", choices=['SLT', "ISLR", "CSLR"])

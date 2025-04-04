@@ -6,7 +6,7 @@ from torch.utils.data import DataLoader
 
 from models import Uni_Sign
 import utils as utils
-from datasets import S2T_Dataset_news
+from datasets import S2T_Dataset_news, S2T_Dataset
 
 import os
 import time
@@ -28,8 +28,11 @@ def main(args):
     utils.set_seed(args.seed)
 
     print(f"Creating dataset:")
-    train_data = S2T_Dataset_news(path=train_label_paths[args.dataset], 
+    #train_data = S2T_Dataset_news(path=train_label_paths[args.dataset], 
+    #                              args=args, phase='train')
+    train_data = S2T_Dataset(path=train_label_paths[args.dataset], 
                                   args=args, phase='train')
+    
     print(train_data)
     train_sampler = torch.utils.data.distributed.DistributedSampler(train_data,shuffle=True)
     train_dataloader = DataLoader(train_data,
@@ -40,8 +43,10 @@ def main(args):
                                  pin_memory=args.pin_mem,
                                  drop_last=True)
 
-    dev_data = S2T_Dataset_news(path=dev_label_paths[args.dataset], 
+    dev_data = S2T_Dataset(path=dev_label_paths[args.dataset], 
                                 args=args, phase='dev')
+    # dev_data = S2T_Dataset_news(path=dev_label_paths[args.dataset], 
+    #                             args=args, phase='dev')
     print(dev_data)
     dev_sampler = torch.utils.data.distributed.DistributedSampler(dev_data,shuffle=False)
     dev_dataloader = DataLoader(dev_data,

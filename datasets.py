@@ -12,10 +12,10 @@ from decord import VideoReader, cpu
 import json
 import pathlib
 from torchvision import transforms
-from config import rgb_dirs, pose_dirs
+from config import rgb_dirs, pose_dirs 
 
 # load sub-pose
-def load_part_kp(skeletons, confs, force_ok=False):
+def load_part_kp(skeletons, confs, force_ok=False):     #여기만 바꾸면 됨.
     thr = 0.3
     kps_with_scores = {}
     scale = None
@@ -416,7 +416,12 @@ class S2T_Dataset(Base_Dataset):
             self.pose_dir = pose_dirs[args.dataset]
             self.rgb_dir = rgb_dirs[args.dataset]
             
-        elif "WLASL" in self.args.dataset:
+        elif "WLASL" in self.args.dataset or "KO" in self.args.dataset: #------- MODIFYED -------#
+            if phase=='test' and ('KO' in self.args.dataset):
+                print("================================")
+                print("USE DEV SET AS TEST SET FOR DEBUGING")
+                print("================================")
+                phase='dev'
             self.pose_dir = os.path.join(pose_dirs[args.dataset], phase)
             self.rgb_dir = os.path.join(rgb_dirs[args.dataset], phase)
 
