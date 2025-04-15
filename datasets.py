@@ -1,3 +1,16 @@
+"""
+파일: datasets.py
+설명: load_video_support_rgb의 out of range 에러 수정
+
+작성자: 김도완 <dowan.test@gamail.com>
+생성일: 2025-04-15
+최종 수정일: 2025-04-15
+버전: 1.0.0
+
+변경 내역:
+- 2025-04-15: load_video_support_rgb의 out of range 에러 수정 (김도완)
+"""
+
 import torch
 import utils as utils
 import torch.utils.data.dataset as Dataset
@@ -326,7 +339,10 @@ def load_video_support_rgb(path, tmp):
     vr = VideoReader(path, num_threads=1, ctx=cpu(0))
     
     vr.seek(0)
-    buffer = vr.get_batch(tmp).asnumpy()
+    total_frames = len(vr)  # VideoReader의 총 프레임 수를 len()을 통해 가져옴
+    valid_indices = np.clip(tmp, 0, total_frames - 1)
+    buffer = vr.get_batch(valid_indices).asnumpy()
+    # buffer = vr.get_batch(tmp).asnumpy()
     batch_image = buffer
     del vr
 

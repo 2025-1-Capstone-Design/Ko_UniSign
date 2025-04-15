@@ -8,11 +8,12 @@ def download_files(output_directory, download_pose):
     video_folder = os.path.join(output_directory, "rgb_format")
     os.makedirs(RGB_zip_folder, exist_ok=True)
     os.makedirs(video_folder, exist_ok=True)
-
+    
     RGB_error_log_path = os.path.join(RGB_zip_folder, "download_log.txt")
     
     # Download RGB format
-    for i in range(1, 437):
+    # for i in range(1, 437):
+    for i in range(266, 437):
         url = f"https://huggingface.co/datasets/ZechengLi19/CSL-News/resolve/main/archive_{i:03d}.zip"
         file_path = os.path.join(RGB_zip_folder, f"archive_{i}.zip")
         if os.path.exists(file_path):

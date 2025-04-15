@@ -10,6 +10,20 @@ Misc functions, including distributed helpers.
 
 Mostly copy-paste from torchvision references.
 """
+
+"""
+파일: utils.py
+설명: Wandb logging parser, Tensorboard parser 추가
+
+작성자: 김도완 <dowan.test@gamail.com>
+생성일: 2025-04-15
+최종 수정일: 2025-04-15
+버전: 1.0.0
+
+변경 내역:
+- 2025-04-15: Wandb logging parser, Tensorboard parser 추가 (김도완)
+"""
+
 import io
 import os
 import time,random
@@ -346,7 +360,7 @@ def get_train_ds_config(offload,
                         max_out_tokens=512,
                         enable_tensorboard=False,
                         enable_mixed_precision_lora=False,
-                        tb_path="",
+                        tb_path=".",
                         tb_name="",
                         args=''):
 
@@ -407,7 +421,8 @@ def init_deepspeed(args, model, optimizer, lr_scheduler):
         offload=args.offload,
         dtype=args.dtype,
         stage=args.zero_stage,
-        args=args
+        args=args,
+        enable_tensorboard=args.enable_tensorboard    # tensoarboard 로깅 추가
     )
 
     ds_config['train_micro_batch_size_per_gpu'] = args.batch_size
@@ -485,7 +500,7 @@ def get_args_parser():
                         help='path where to save, empty for no saving')
     parser.add_argument('--seed', default=42, type=int)
     parser.add_argument('--eval', action='store_true', help='Perform evaluation only')
-    parser.add_argument('--num_workers', default=8, type=int)
+    parser.add_argument('--num_workers', default=8, type=int)    # 8
     parser.add_argument('--pin-mem', action='store_true',
                         help='Pin CPU memory in DataLoader for more efficient (sometimes) transfer to GPU.')
     parser.add_argument('--no-pin-mem', action='store_false', dest='pin_mem',
@@ -496,6 +511,7 @@ def get_args_parser():
     parser.add_argument('--offload',
                         action='store_true',
                         help='Enable ZeRO Offload techniques.')
+    ##### 호환성 오류로 fp16으로 변경 #######################
     parser.add_argument('--dtype',
                         type=str,
                         default='bf16',
@@ -530,5 +546,11 @@ def get_args_parser():
     
     # select label smooth
     parser.add_argument("--label_smoothing", default=0.2, type=float)
+
+    # enable tensorbard
+    parser.add_argument('--enable_tensorboard', action='store_true',
+                        help='Enable TensorBoard logging via DeepSpeed')
+    # enable wandb
+    parser.add_argument('--wandb_online', action='store_true', help='Enable online Weights & Biases logging')
     
     return parser

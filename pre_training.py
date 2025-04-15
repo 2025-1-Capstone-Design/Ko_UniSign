@@ -1,3 +1,4 @@
+export MALLOC_CHECK_=0
 
 from pickletools import optimize
 import torch
@@ -229,7 +230,7 @@ def evaluate(args, data_loader, model, model_without_ddp):
                 tgt_pres.append(output[i])
                 tgt_refs.append(tgt_input['gt_sentence'][i])
 
-    tokenizer = model_without_ddp.mt5_tokenizer
+    tokenizer = model_without_ddp.gemma_tokenizer
     padding_value = tokenizer.eos_token_id
     
     pad_tensor = torch.ones(150-len(tgt_pres[0])).cuda() * padding_value
