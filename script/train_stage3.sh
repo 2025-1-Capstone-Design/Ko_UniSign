@@ -30,7 +30,6 @@ ckpt_path=out/stage2_pretraining/best_checkpoint.pth
     --task ISLR \
     --max_length 64 \
     --warmup-epochs 3 \
-    --wandb_online \
     --rgb_support # enable RGB-pose setting
 
 ## pose only setting
