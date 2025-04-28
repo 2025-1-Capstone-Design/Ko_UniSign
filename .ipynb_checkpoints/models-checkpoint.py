@@ -327,7 +327,6 @@ class Uni_Sign(nn.Module):
         # visual_attention_mask = torch.ones(visual_features.shape[:2], dtype=torch.long, device=visual_features.device)
         visual_attention_mask = src_input['attention_mask'].to(visual_embeds.device)
 
-
         # Prefix 토큰화 및 임베딩
         prefix_text = [f"Translate sign language video to {self.lang}: "] * visual_embeds.shape[0] # 배치 크기 기준
         prefix_token = self.gemma_tokenizer(
@@ -339,9 +338,10 @@ class Uni_Sign(nn.Module):
 
         # Target 토큰화 (Loss 계산용 labels 생성에 필요)
         eos_token = self.gemma_tokenizer.eos_token
-        # bos_token = self.gemma_tokenizer.bos_token # Gemma는 보통 BOS 토큰 사용gt_input['gt_sentence'] = [s + eos_token for s in tgt_input['gt_sentence']]
+        # bos_token = self.gemma_tokenizer.bos_token # Gemma는 보통 BOS 토큰 사용
+        tgt_input['gt_sentence'] = [s + eos_token for s in tgt_input['gt_sentence']]    # <eos> 토큰 추가
 
-        # add_special_tokens로 <bos> 토큰 제외 (<bos>토큰은 prefix에만 필요)
+        # add_special_tokens로 <bos> 토큰 제외 (<bos>토큰은 prefix에만 필요), padding=left로 해야 <eos>토큰이 입력 데이터에서 제외
         tgt_input_tokenizer = self.gemma_tokenizer(
             tgt_input['gt_sentence'], return_tensors="pt", padding="longest", truncation=True, padding_side='left', add_special_tokens=False, max_length=50
         ).to(visual_embeds.device)
@@ -368,7 +368,7 @@ class Uni_Sign(nn.Module):
             visual_start_token_embeds,  # (B, 1,       H)
             visual_embeds,              # (B, T_video, H)
             visual_end_token_embeds,    # (B, 1,       H)
-            tgt_embeds[:, :-1, :]       # (B, T_target-1, H) -> target의 마지막 토큰 제외
+            tgt_embeds[:, :-1, :]       # (B, T_target-1, H) -> target의 마지막 토큰 제외(<eos> 토큰)
         ], dim=1)
 
         # Attention Mask 생성: Special token 자리에도 1 추가
@@ -461,9 +461,9 @@ class Uni_Sign(nn.Module):
         #                     is_correct = "Yes" if label_id == pred_id else "No"
         #                     # 각 컬럼 너비에 맞춰 출력
         #                     print(f"{step:<4} | {label_id:<8} | {label_token:<12} | {pred_id:<8} | {pred_token:<12} | {is_correct:<5}")
-        #                 # else: # 필요하다면 패딩(-100) 위치도 출력
-        #                 #     pred_token = self.gemma_tokenizer.decode(pred_id, skip_special_tokens=False)
-        #                 #     print(f"{step:<4} | {'-100':<8} | {'PAD':<12} | {pred_id:<8} | {pred_token:<12} | {'-':<5}")
+        #                # else: # 필요하다면 패딩(-100) 위치도 출력
+        #               #     pred_token = self.gemma_tokenizer.decode(pred_id, skip_special_tokens=False)
+        #                #     print(f"{step:<4} | {'-100':<8} | {'PAD':<12} | {pred_id:<8} | {pred_token:<12} | {'-':<5}")
         
         #             print("-" * 70) # 샘플 구분선
         
@@ -500,8 +500,8 @@ class Uni_Sign(nn.Module):
             'inputs_embeds': training_inputs_embeds,
             'attention_mask': training_attention_mask,
             'loss': loss,
-            'target_logits': target_logits, # Target 예측에 해당하는 로짓 슬라이스
-            'labels': labels              # Loss 계산에 사용된 최종 레이블 (마스킹 적용됨)
+            # 'target_logits': target_logits, # Target 예측에 해당하는 로짓 슬라이스
+            # 'labels': labels              # Loss 계산에 사용된 최종 레이블 (마스킹 적용됨)
         }
 
         return stack_out
@@ -588,6 +588,9 @@ class Uni_Sign(nn.Module):
             visual_attention_mask, # 원본 비디오 길이 마스크
             visual_end_mask
         ], dim=1)
+
+        # inference_attention_mask = src_input['attention_mask']
+        # inference_inputs_embeds = src_input['inputs_embeds']
 
         # generate 호출
         outputs = self.lora_model.generate(

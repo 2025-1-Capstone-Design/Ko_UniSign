@@ -1,4 +1,5 @@
 output_dir=out/stage3_finetuning
+export MALLOC_CHECK_=0
 
 # RGB-pose setting
 ckpt_path=out/stage2_pretraining/best_checkpoint.pth
@@ -30,6 +31,7 @@ ckpt_path=out/stage2_pretraining/best_checkpoint.pth
     --task ISLR \
     --max_length 64 \
     --warmup-epochs 3 \
+    --wandb_online \
     --rgb_support # enable RGB-pose setting
 
 ## pose only setting

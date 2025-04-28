@@ -1,5 +1,3 @@
-export MALLOC_CHECK_=0
-
 from pickletools import optimize
 import torch
 from torch.nn.utils.rnn import pad_sequence
@@ -22,11 +20,25 @@ from SLRT_metrics import translation_performance
 from config import *
 from typing import Iterable, Optional
 
+import wandb
+
 def main(args):
     utils.init_distributed_mode_ds(args)
 
     print(args)
     utils.set_seed(args.seed)
+
+    # --- 2. Wandb Initialization (Main Process Only) ---
+    if utils.is_main_process():
+        # 프로젝트 이름, 실행 이름 등을 설정할 수 있습니다.
+        run_name = f"{args.dataset}_{args.task}_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        wandb.init(
+            project="Uni-Sign-Finetuning", # <-- 원하는 프로젝트 이름으로 변경
+            name=run_name,
+            config=vars(args), # 하이퍼파라미터를 config에 저장
+            mode="online" if args.wandb_online else "disabled" # wandb 활성화/비활성화 제어
+        )
+    # ----------------------------------------------------
 
     print(f"Creating dataset:")
     train_data = S2T_Dataset_news(path=train_label_paths[args.dataset], 
@@ -117,6 +129,16 @@ def main(args):
         
         train_stats = train_one_epoch(args, model, train_dataloader, optimizer, epoch, model_without_ddp=model_without_ddp)
 
+        # --- 3. Log training metrics to wandb (Main Process Only) ---
+        if utils.is_main_process() and wandb.run is not None:
+            log_dict_train = {f'train/{k}': v for k, v in train_stats.items()}
+            log_dict_train['epoch'] = epoch
+            # 현재 learning rate 로깅 (DeepSpeed 사용 시 optimizer 구조 확인 필요)
+            current_lr = optimizer.param_groups[0]['lr']
+            log_dict_train['train/learning_rate'] = current_lr
+            wandb.log(log_dict_train) # 기본적으로 global step 사용, epoch 기준으로 하려면 commit=False 후 별도 로그
+        # -------------------------------------------------------------
+
         if args.output_dir:
             checkpoint_paths = [output_dir / f'checkpoint_{epoch}.pth']
             for checkpoint_path in checkpoint_paths:
@@ -125,6 +147,18 @@ def main(args):
                 }, checkpoint_path)
         test_stats = evaluate(args, dev_dataloader, model, model_without_ddp)
         print(f"BLEU-4 of the network on the {len(dev_dataloader)} dev videos: {test_stats['bleu4']:.2f}")
+
+        # --- 3. Log evaluation metrics to wandb ---
+        if wandb.run is not None:
+            log_dict_eval = {}
+            for k, v in test_stats.items():
+                log_dict_eval[f'dev/{k}'] = v
+            # for k, v in test_stats.items():
+            #     log_dict_eval[f'test/{k}'] = v
+            # epoch 기준으로 로깅 (wandb step과 별개로 관리 가능)
+            log_dict_eval['epoch'] = epoch
+            wandb.log(log_dict_eval)
+        # ------------------------------------------
 
         if max_accuracy < test_stats["bleu4"]:
             max_accuracy = test_stats["bleu4"]
@@ -148,6 +182,12 @@ def main(args):
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print('Training time {}'.format(total_time_str))
+
+    # --- Finish Wandb Run ---
+    # 최종 평가 결과까지 로깅 후 종료
+    if utils.is_main_process() and wandb.run is not None:
+        wandb.finish()
+    # ---------------------------
 
 def train_one_epoch(args, model, data_loader, optimizer, epoch, model_without_ddp):
     model.train()
@@ -221,7 +261,7 @@ def evaluate(args, data_loader, model, model_without_ddp):
             total_loss = stack_out['loss']
             metric_logger.update(loss=total_loss.item())
         
-            output = model_without_ddp.generate(stack_out, 
+            output = model_without_ddp.generate(src_input,    # 원래는 stack_out 하면 됨 
                                                 max_new_tokens=100, 
                                                 num_beams = 4,
                         )

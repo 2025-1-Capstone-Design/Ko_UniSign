@@ -1,4 +1,5 @@
 output_dir=out/stage3_finetuning
+export MALLOC_CHECK_=0
 
 # RGB-pose setting
 ckpt_path=out/stage2_pretraining/best_checkpoint.pth

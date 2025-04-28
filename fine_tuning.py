@@ -48,7 +48,6 @@ def main(args):
             mode="online" if args.wandb_online else "disabled" # wandb 활성화/비활성화 제어
         )
     # ----------------------------------------------------
-    
 
     print(f"Creating dataset:")
         
@@ -202,6 +201,34 @@ def main(args):
                 utils.save_on_master({
                     'model': get_requires_grad_dict(model_without_ddp),
                 }, checkpoint_path)
+            
+            # adapter_save_dir = f"{output_dir}/'checkpoint_apapter_{epoch}'" # 어댑터 저장 디렉토리
+            # uni_sign_weights_save_path = f"{output_dir}/'checkpoint_uni_sign_{epoch}.pth'" # Uni-Sign 자체 가중치 파일
+        
+            # # 1. LoRA 어댑터 저장
+            # model_without_ddp.lora_model.save_pretrained(adapter_save_dir)
+            # model_without_ddp.gemma_tokenizer.save_pretrained(adapter_save_dir)
+            # print(f"LoRA adapter saved to {adapter_save_dir}")
+        
+            # # 2. Uni-Sign 자체 가중치 저장 (Gemma 및 LoRA 제외)
+            # uni_sign_state_dict = {}
+            # # lora_model 내부 파라미터 이름 접두사 확인 (예: 'lora_model.')
+            # lora_prefix = "lora_model."
+            # # 또는 Gemma 모델 파라미터 이름 접두사 확인 (예: 'gemma_model.') - Uni_Sign 구조에 따라 다름
+            # # gemma_prefix = "gemma_model." # 혹은 lora_model 내부의 base_model 접근 경로
+        
+            # for name, param in model_without_ddp.named_parameters():
+            #     # LoRA 모델(PeftModel) 또는 그 내부의 베이스 모델 파라미터가 아니면 저장
+            #     if not name.startswith(lora_prefix): # Uni_Sign 내 lora_model 객체 이름 기준
+            #        # 만약 gemma_model도 별도 속성으로 있다면 그것도 제외
+            #        # if not name.startswith(gemma_prefix): # Uni_Sign 내 gemma_model 객체 이름 기준
+            #        uni_sign_state_dict[name] = param.cpu().clone() # CPU로 복사하여 저장
+        
+            # if uni_sign_state_dict: # 저장할 가중치가 있다면
+            #     utils.save_on_master({'uni_sign_weights': uni_sign_state_dict}, uni_sign_weights_save_path)
+            #     print(f"Uni-Sign specific weights saved to {uni_sign_weights_save_path}")
+            # else:
+            #     print("No Uni-Sign specific weights found to save (excluding LoRA/Gemma).")
 
         # single gpu inference
         if utils.is_main_process():
