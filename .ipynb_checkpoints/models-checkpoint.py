@@ -155,7 +155,7 @@ class Uni_Sign(nn.Module):
                     nn.init.constant_(layer.bias, 0)
 
         # Gemma 3 모델 및 토크나이저 로드 (MT5 -> Gemma 3)
-        gemma_path = "google/gemma-3-1b-it"
+        gemma_path = "google/gemma-3-1b-it"    # "google/gemma-3-1b-it"
         # 먼저 토크나이저 로드 및 스페셜 토큰 추가
         self.gemma_tokenizer = AutoTokenizer.from_pretrained(gemma_path, legacy=False, attn_implementation='eager')
         # --- Special Token 추가 ---
@@ -329,6 +329,8 @@ class Uni_Sign(nn.Module):
 
         # Prefix 토큰화 및 임베딩
         prefix_text = [f"Translate sign language video to {self.lang}: "] * visual_embeds.shape[0] # 배치 크기 기준
+        # prefix_text = [f"Consider the hand shapes, movements, and facial expressions in the sign language video features. Thinking step-by-step, synthesize this information and translate into {self.lang}:"] * visual_embeds.shape[0]
+        
         prefix_token = self.gemma_tokenizer(
             prefix_text, padding="longest", truncation=True, return_tensors="pt"
         ).to(visual_embeds.device)
@@ -558,6 +560,7 @@ class Uni_Sign(nn.Module):
        # 2. Prefix Embedding 계산
         batch_size = visual_embeds.shape[0]
         prefix_text = [f"Translate sign language video to {self.lang}: "] * batch_size
+        # prefix_text = [f"Consider the hand shapes, movements, and facial expressions in the sign language video features. Thinking step-by-step, synthesize this information and translate into {self.lang}:"] * batch_size
         prefix_token = self.gemma_tokenizer(
             prefix_text, padding="longest", truncation=True, return_tensors="pt"
         ).to(self.device) # device 통일
