@@ -20,3 +20,4 @@ tools/*.mp4
 dataset/
 ds_tensorboard_logs/
 data/CSL_News/CSL_News_Labels.csv
+pretrained_weight/

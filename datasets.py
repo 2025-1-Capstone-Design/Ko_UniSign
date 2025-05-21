@@ -428,7 +428,7 @@ class S2T_Dataset(Base_Dataset):
         self.raw_data = utils.load_dataset_file(path)
         self.phase = phase
 
-        if self.args.dataset == "CSL_Daily":
+        if self.args.dataset in ["CSL_Daily", "How2Sign"]:
             self.pose_dir = pose_dirs[args.dataset]
             self.rgb_dir = rgb_dirs[args.dataset]
             

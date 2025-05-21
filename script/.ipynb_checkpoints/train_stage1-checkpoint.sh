@@ -1,5 +1,5 @@
 output_dir=out/stage1_pretraining
-ckpt_path=out/stage1_pretraining/best_checkpoint.pth
+# ckpt_path=out/stage1_pretraining/best_checkpoint.pth
 export MALLOC_CHECK_=0
 
    # --wandb_online \
