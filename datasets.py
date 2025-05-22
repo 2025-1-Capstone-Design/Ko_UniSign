@@ -436,7 +436,7 @@ class S2T_Dataset(Base_Dataset):
             self.pose_dir = os.path.join(pose_dirs[args.dataset], phase)
             self.rgb_dir = os.path.join(rgb_dirs[args.dataset], phase)
 
-        elif "How2Sign" in self.args.dataset:
+        elif "How2Sign" in self.args.dataset or "OpenASL" in self.args.dataset:
             self.pose_dir = os.path.join(pose_dirs[args.dataset], phase)
             self.rgb_dir = os.path.join(rgb_dirs[args.dataset], phase)
 

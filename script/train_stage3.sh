@@ -7,14 +7,14 @@ ckpt_path=out/stage2_pretraining/best_checkpoint.pth
 # --wandb_online \
 
 deepspeed --include localhost:0 --master_port 29511 fine_tuning.py \
-  --batch-size 4 \
-  --gradient-accumulation-steps 4 \
+  --batch-size 2 \
+  --gradient-accumulation-steps 8 \
   --epochs 20 \
   --opt AdamW \
   --lr 3e-4 \
   --output_dir $output_dir \
   --finetune $ckpt_path \
-  --dataset How2Sign \
+  --dataset OpenASL \
   --task SLT \
   --rgb_support # enable RGB-pose setting
 

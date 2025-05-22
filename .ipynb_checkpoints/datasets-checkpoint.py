@@ -428,11 +428,15 @@ class S2T_Dataset(Base_Dataset):
         self.raw_data = utils.load_dataset_file(path)
         self.phase = phase
 
-        if self.args.dataset in ["CSL_Daily", "How2Sign"]:
+        if self.args.dataset == "CSL_Daily":
             self.pose_dir = pose_dirs[args.dataset]
             self.rgb_dir = rgb_dirs[args.dataset]
             
         elif "WLASL" in self.args.dataset:
+            self.pose_dir = os.path.join(pose_dirs[args.dataset], phase)
+            self.rgb_dir = os.path.join(rgb_dirs[args.dataset], phase)
+
+        elif "How2Sign" in self.args.dataset or "OpenASL" in self.args.dataset:
             self.pose_dir = os.path.join(pose_dirs[args.dataset], phase)
             self.rgb_dir = os.path.join(rgb_dirs[args.dataset], phase)
 

@@ -6,6 +6,7 @@ train_label_paths = {
                     "CSL_Daily": "./data/CSL_Daily/labels.train",
                     "WLASL": "./data/WLASL/labels-2000.train",
                     "How2Sign": "./data/How2Sign/how2sign_labels.train",
+                    "OpenASL": "./data/OpenASL/openasl_labels.train",
                     }
 
 dev_label_paths = {
@@ -13,6 +14,7 @@ dev_label_paths = {
                     "CSL_Daily": "./data/CSL_Daily/labels.dev",
                     "WLASL": "./data/WLASL/labels-2000.dev",
                     "How2Sign": "./data/How2Sign/how2sign_labels.dev",
+                    "OpenASL": "./data/OpenASL/openasl_labels.dev",
                     }
 
 test_label_paths = {
@@ -20,6 +22,7 @@ test_label_paths = {
                     "CSL_Daily": "./data/CSL_Daily/labels.test",
                     "WLASL": "./data/WLASL/labels-2000.test",
                     "How2Sign": "./data/How2Sign/how2sign_labels.test",
+                    "OpenASL": "./data/OpenASL/openasl_labels.test",
                     }
 
 
@@ -29,6 +32,7 @@ rgb_dirs = {
             "CSL_Daily": './dataset/CSL_Daily/sentence-crop',
             "WLASL": "./dataset/WLASL/rgb_format",
             "How2Sign": "./dataset/How2Sign/rgb_format",
+            "OpenASL": "./dataset/OpenASL/rgb_format",
             }
 
 # pose paths
@@ -37,4 +41,5 @@ pose_dirs = {
             "CSL_Daily": './dataset/CSL_Daily/pose_format',
             "WLASL": "./dataset/WLASL/pose_format",
             "How2Sign": "./dataset/How2Sign/pose_format",
+            "OpenASL": "./dataset/OpenASL/pose_format",
             }
