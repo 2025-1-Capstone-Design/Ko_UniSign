@@ -5,21 +5,21 @@ train_label_paths = {
                     "CSL_News": "./data/CSL_News/CSL_News_Labels.json",
                     "CSL_Daily": "./data/CSL_Daily/labels.train",
                     "WLASL": "./data/WLASL/labels-2000.train",
-                    "How2sign": "./data/How2Sign/how2sign_labels.train",
+                    "How2Sign": "./data/How2Sign/how2sign_labels.train",
                     }
 
 dev_label_paths = {
                     "CSL_News": "./data/CSL_News/CSL_News_Labels.json",
                     "CSL_Daily": "./data/CSL_Daily/labels.dev",
                     "WLASL": "./data/WLASL/labels-2000.dev",
-                    "How2sign": "./data/How2Sign/how2sign_labels.dev",
+                    "How2Sign": "./data/How2Sign/how2sign_labels.dev",
                     }
 
 test_label_paths = {
                     "CSL_News": "./data/CSL_News/CSL_News_Labels.json",
                     "CSL_Daily": "./data/CSL_Daily/labels.test",
                     "WLASL": "./data/WLASL/labels-2000.test",
-                    "How2sign": "./data/How2Sign/how2sign_labels.test",
+                    "How2Sign": "./data/How2Sign/how2sign_labels.test",
                     }
 
 
