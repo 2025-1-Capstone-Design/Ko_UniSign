@@ -5,7 +5,7 @@ from torch.utils.data import DataLoader
 
 from models import Uni_Sign
 import utils as utils
-from datasets import S2T_Dataset_news
+from datasets_ours import S2T_Dataset_news
 
 import os
 import time

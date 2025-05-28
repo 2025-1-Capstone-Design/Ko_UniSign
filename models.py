@@ -12,7 +12,7 @@
 - 2025-04-15: MT5 디코더를 Gemma 3 (1b-it)로 교체하고 PEFT LoRA 통합 (김도완)
 """
 
-
+import torch.nn.functional as F
 from torch import Tensor
 import torch
 from torch import nn
@@ -327,16 +327,43 @@ class Uni_Sign(nn.Module):
         # visual_attention_mask = torch.ones(visual_features.shape[:2], dtype=torch.long, device=visual_features.device)
         visual_attention_mask = src_input['attention_mask'].to(visual_embeds.device)
 
-        # Prefix 토큰화 및 임베딩
-        prefix_text = [f"Translate sign language video to {self.lang}: "] * visual_embeds.shape[0] # 배치 크기 기준
-        # prefix_text = [f"Consider the hand shapes, movements, and facial expressions in the sign language video features. Thinking step-by-step, synthesize this information and translate into {self.lang}:"] * visual_embeds.shape[0]
         
+        #------------------------- ADDED [JH] 2025-05-27 ------------------------------------------------------------#
+        # Prefix 토큰화 및 임베딩
+        if len(src_input['background'])==0: #original translation case
+            prefix_text = [f"Translate sign language video to {self.lang}: "] * visual_embeds.shape[0] # 배치 크기 기준
+        else: #QA case
+            src_prefix = list()
+            src_postfix = list()
+            for cur_bg in src_input['background']:
+                text1 = (f"<bos><start_of_turn>user\n",
+                        f"Based on background, reply following conversation\n\n", #real prompt
+                        f"Background: {cur_bg}\n",
+                        f"User A: ",
+                        )
+                text2 = (f"User B: <end_of_turn>\n",
+                         "<start_of_turn>model\n")
+                
+                src_prefix.append("".join(text1))
+                src_postfix.append("".join(text2))                
+            prefix_text = src_prefix #for consistency
+            postfix_text =src_postfix
+            #prefix_text = [f"Translate sign language video to {self.lang}: "] * visual_embeds.shape[0] # 배치 크기 기준
+        #------------------------------------------------------------------------------------------------------------#
+        
+                
         prefix_token = self.gemma_tokenizer(
             prefix_text, padding="longest", truncation=True, return_tensors="pt"
         ).to(visual_embeds.device)
-        
-        # LoRA 적용된 모델의 임베딩 사용
         prefix_embeds = self.lora_model.get_base_model().model.embed_tokens(prefix_token["input_ids"]) # (B, T_prefix, Hidden_dim)
+
+        #-------------------------------------------------------------#
+        if len(src_input['background'])!=0:
+            postfix_token = self.gemma_tokenizer(
+                postfix_text, padding="longest", truncation=True, return_tensors="pt"
+            ).to(visual_embeds.device)
+            postfix_embeds = self.lora_model.get_base_model().model.embed_tokens(postfix_token["input_ids"]) # (B, T_prefix, Hidden_dim)        
+        #-------------------------------------------------------------#
 
         # Target 토큰화 (Loss 계산용 labels 생성에 필요)
         eos_token = self.gemma_tokenizer.eos_token
@@ -365,32 +392,87 @@ class Uni_Sign(nn.Module):
         # --- Special Token 임베딩 생성 끝 ---
 
         # 모델 입력 임베딩: prefix + <visual_start> + visual + <visual_end> + target (shifted right)
-        training_inputs_embeds = torch.cat([
-            prefix_embeds,              # (B, T_prefix, H)
-            visual_start_token_embeds,  # (B, 1,       H)
-            visual_embeds,              # (B, T_video, H)
-            visual_end_token_embeds,    # (B, 1,       H)
-            tgt_embeds[:, :-1, :]       # (B, T_target-1, H) -> target의 마지막 토큰 제외(<eos> 토큰)
-        ], dim=1)
-
+        if len(src_input['background'])==0:
+            training_inputs_embeds = torch.cat([
+                prefix_embeds,              # (B, T_prefix, H)
+                visual_start_token_embeds,  # (B, 1,       H)
+                visual_embeds,              # (B, T_video, H)
+                visual_end_token_embeds,    # (B, 1,       H)
+                tgt_embeds[:, :-1, :]       # (B, T_target-1, H) -> target의 마지막 토큰 제외(<eos> 토큰)
+            ], dim=1)
+        else:
+            training_inputs_embeds = torch.cat([
+                prefix_embeds,              # (B, T_prefix, H)
+                visual_start_token_embeds,  # (B, 1,       H)
+                visual_embeds,              # (B, T_video, H)
+                visual_end_token_embeds,    # (B, 1,       H)
+                postfix_embeds,
+                tgt_embeds[:, :-1, :]       # (B, T_target-1, H) -> target의 마지막 토큰 제외(<eos> 토큰)
+            ], dim=1)
+            
         # Attention Mask 생성: Special token 자리에도 1 추가
         visual_start_mask = torch.ones(batch_size, 1, dtype=torch.long, device=visual_embeds.device)
         visual_end_mask = torch.ones(batch_size, 1, dtype=torch.long, device=visual_embeds.device)
 
-        training_attention_mask = torch.cat([
-            prefix_token['attention_mask'], # (B, T_prefix)
-            visual_start_mask,              # (B, 1)
-            visual_attention_mask,          # (B, T_video) - 원본 비디오 길이 반영
-            visual_end_mask,                # (B, 1)
-            tgt_attention_mask[:, :-1]      # (B, T_target-1)
-        ], dim=1)
-
+        if len(src_input['background'])==0:
+            training_attention_mask = torch.cat([
+                prefix_token['attention_mask'], # (B, T_prefix)
+                visual_start_mask,              # (B, 1)
+                visual_attention_mask,          # (B, T_video) - 원본 비디오 길이 반영
+                visual_end_mask,                # (B, 1)
+                tgt_attention_mask[:, :-1]      # (B, T_target-1)
+            ], dim=1)
+        else:
+            training_attention_mask = torch.cat([
+                prefix_token['attention_mask'], # (B, T_prefix)
+                visual_start_mask,              # (B, 1)
+                visual_attention_mask,          # (B, T_video) - 원본 비디오 길이 반영
+                visual_end_mask,                # (B, 1)
+                postfix_token['attention_mask'],
+                tgt_attention_mask[:, :-1]      # (B, T_target-1)
+            ], dim=1)
+            
         # 모델 호출 (LoRA 모델 직접 사용)
         out = self.lora_model(inputs_embeds=training_inputs_embeds,
                               attention_mask=training_attention_mask,
+                                output_hidden_states=False, #added
                               return_dict=True)
 
         all_logits = out.logits # (B, T_prefix + 1 + T_video + 1 + T_target - 1, Vocab_size)
+
+        #----------------------- CL Loss Start ------------------------------#
+
+        alpha = 0.25
+        if False: #use CL Loss
+            prefix_len  = prefix_embeds.size(1)              # <bos> 제외
+            video_len   = visual_embeds.size(1)
+            idx_vid_end = prefix_len + 1 + video_len         # <visual_end> 토큰 위치
+
+            # 2) hidden state 추출  → (B, H)
+            #h = out.last_hidden_state[:, idx_vid_end, :]         # (B, L, H)  ← 추가
+            h = out.hidden_states[-1][:, idx_vid_end, :]     # 마지막 layer 사용
+
+            # 3) 정규화 & 유사도 행렬  S = h · hᵀ / τ
+            temperature = 0.07
+            h_norm  = F.normalize(h, dim=-1)                 # (B, H)
+            logits = h_norm @ h_norm.T                      # (B, B)
+            logits = logits / temperature
+
+            # 4) InfoNCE: 자기 자신(대각)만 positive
+            batch_size = h.size(0)
+            target = torch.arange(batch_size, device=h.device)
+            cl_loss = F.cross_entropy(logits, target)
+        else:
+            cl_loss = 0        
+        
+        
+        #----------------------- CL Loss end -----------------------------------#
+        
+        
+        
+        
+        
+        
 
         # Loss 계산용 레이블 준비
         labels = tgt_input_ids.clone() # (B, T_target-1)
@@ -400,13 +482,23 @@ class Uni_Sign(nn.Module):
         prefix_len = prefix_embeds.shape[1] - 1   # <bos>길이 제외 출력은 <bos> 안나오니까
         video_len = visual_embeds.shape[1]
         # Target logits 시작 위치: prefix 길이 + <visual-start> + 비디오 길이 + <visual-end>
-        start_target_logits_index = prefix_len + 1 + video_len + 1
+
+        if len(src_input['background'])==0:
+            start_target_logits_index = prefix_len + 1 + video_len + 1
+        else:
+            start_target_logits_index = prefix_len + 1 + video_len + postfix_embeds.shape[1] + 1 
+            
         # 로짓의 길이는 T_target - 1 이어야 함
         end_target_logits_index = start_target_logits_index + tgt_embeds.shape[1]
 
         # 전체 로짓 시퀀스 길이와 계산된 end index 비교 (디버깅용)
         total_logit_len = all_logits.shape[1]
-        expected_logit_len_before_target = prefix_len + 1 + video_len + 1
+
+        if len(src_input['background'])==0:
+            expected_logit_len_before_target = prefix_len + 1 + video_len + 1
+        else:
+            expected_logit_len_before_target = prefix_len + 1 + video_len + postfix_embeds.shape[1] + 1 
+            
         expected_target_logit_len = tgt_embeds.shape[1]
         assert total_logit_len == expected_logit_len_before_target + expected_target_logit_len
 
@@ -420,7 +512,243 @@ class Uni_Sign(nn.Module):
             # 정상 슬라이싱, 길이는 T_target - 1 만큼만
             target_logits = all_logits[:, start_target_logits_index : end_target_logits_index, :] # (B, T_target - 1, Vocab_size)
 
+        # Loss 계산
+        loss_fct = torch.nn.CrossEntropyLoss(ignore_index=-100)
 
+        # 로짓과 레이블의 길이(T_target-1)가 같은지 확인 후 계산
+        loss_logit_len = target_logits.shape[1]
+        loss_label_len = labels.shape[1]
+
+        if loss_logit_len == 0: # target_logits가 비어있는 경우 처리
+             loss = torch.tensor(0.0, device=all_logits.device, requires_grad=True) # 또는 다른 적절한 처리
+             print("Warning: No target logits found for loss calculation.")
+        elif loss_logit_len != loss_label_len:
+            # 길이가 다르면 작은 쪽에 맞춰서 계산 (잠재적 문제 알림)
+            print(f"Warning: Mismatch in target logits ({loss_logit_len}) and labels ({loss_label_len}) length for loss. Using min length.")
+            min_len_for_loss = min(loss_logit_len, loss_label_len)
+            if min_len_for_loss == 0:
+                 loss = torch.tensor(0.0, device=all_logits.device, requires_grad=True)
+            else:
+                 loss = loss_fct(target_logits[:, :min_len_for_loss, :].reshape(-1, target_logits.size(-1)),
+                                 labels[:, :min_len_for_loss].reshape(-1).long())
+        else:
+            # 길이가 같으면 정상 계산
+            loss = loss_fct(target_logits.reshape(-1, target_logits.size(-1)),
+                            labels.reshape(-1).long())
+
+        stack_out = {
+            'inputs_embeds': training_inputs_embeds,
+            'attention_mask': training_attention_mask,
+            'loss': loss + alpha * cl_loss,
+            # 'target_logits': target_logits, # Target 예측에 해당하는 로짓 슬라이스
+            # 'labels': labels              # Loss 계산에 사용된 최종 레이블 (마스킹 적용됨)
+        }
+
+        return stack_out
+
+    @torch.no_grad()
+    def generate(self,
+                 src_input,
+                 max_new_tokens,
+                 num_beams):
+    
+        # 수어 영상 특징 추출, 기존과 동일
+        features = []
+        body_feat = None
+        
+        rgb_support_dict = {}
+        if self.args.rgb_support:
+             for index_key, rgb_key in zip(['left_sampled_indices', 'right_sampled_indices'], ['left_hands', 'right_hands']):
+                  rgb_feat = self.rgb_support_backbone(src_input[rgb_key])
+                  rgb_support_dict[index_key] = src_input[index_key]
+                  rgb_support_dict[rgb_key] = rgb_feat
+    
+        for part in self.modes:
+            proj_feat = self.proj_linear[part](src_input[part]).permute(0,3,1,2) #B,C,T,V
+            gcn_feat = self.gcn_modules[part](proj_feat)
+            if part == 'body':
+                body_feat = gcn_feat
+            else:
+                assert not body_feat is None
+                
+                if part == 'left':
+                     if self.args.rgb_support:
+                         gcn_feat = self.gather_feat_pose_rgb(gcn_feat, rgb_support_dict[f'{part}_hands'], rgb_support_dict[f'{part}_sampled_indices'], src_input[f'{part}_rgb_len'], src_input[f'{part}_skeletons_norm'])
+                     gcn_feat = gcn_feat + body_feat[..., -2][...,None].detach()
+                elif part == 'right':
+                     if self.args.rgb_support:
+                          gcn_feat = self.gather_feat_pose_rgb(gcn_feat, rgb_support_dict[f'{part}_hands'], rgb_support_dict[f'{part}_sampled_indices'], src_input[f'{part}_rgb_len'], src_input[f'{part}_skeletons_norm'])
+                     gcn_feat = gcn_feat + body_feat[..., -1][...,None].detach()
+                elif part == 'face_all':
+                     gcn_feat = gcn_feat + body_feat[..., 0][...,None].detach()
+                else: raise NotImplementedError
+    
+            gcn_feat = self.fusion_gcn_modules[part](gcn_feat) #B,C,T,V
+            pool_feat = gcn_feat.mean(-1).transpose(1,2) #B,T,C
+            features.append(pool_feat)
+
+            # ───────────────────────────────────────── [GENERATE] 수정본 ───────────────────────────────────────── #
+        # concat sub-pose feature -> 최종 Visual Embedding
+        visual_features = torch.cat(features, dim=-1) + self.part_para.to(self.device)
+
+        # Transformer Encoder 미사용
+        visual_embeds = self.pose_proj(visual_features)                                       # (B, T_video, H)
+        visual_attention_mask = src_input['attention_mask'].to(visual_embeds.device)          # (B, T_video)
+
+        # ------------------------- ADDED [JH] 2025-05-27 ----------------------------------------------- #
+        # 1. Prefix / Post-fix 구성 (번역 ↔ QA 구분)
+        batch_size = visual_embeds.shape[0]
+        if len(src_input['background']) == 0:             # (A) 순수 번역
+            prefix_text  = [f"Translate sign language video to {self.lang}: "] * batch_size
+            use_postfix  = False
+        else:                                             # (B) 대화-기반 QA
+            src_prefix, src_postfix = [], []
+            for cur_bg in src_input['background']:
+                text1 = (
+                    "<bos><start_of_turn>user\n"
+                    "Based on background, reply following conversation\n\n"
+                    f"Background: {cur_bg}\n"
+                    "User A: "
+                )
+                text2 = (
+                    "User B: <end_of_turn>\n"
+                    "<start_of_turn>model\n"
+                )
+                src_prefix.append(text1)
+                src_postfix.append(text2)
+            prefix_text  = src_prefix
+            postfix_text = src_postfix
+            use_postfix  = True
+        # ----------------------------------------------------------------------------------------------- #
+
+        # 2. Prefix 임베딩  
+        prefix_token = self.gemma_tokenizer(
+            prefix_text, padding="longest", truncation=True, return_tensors="pt"
+        ).to(self.device)
+        prefix_embeds = self.lora_model.get_base_model().model.embed_tokens(prefix_token["input_ids"])
+
+        # 3. (선택) Post-fix 임베딩
+        if use_postfix:
+            postfix_token = self.gemma_tokenizer(
+                postfix_text, padding="longest", truncation=True, return_tensors="pt"
+            ).to(self.device)
+            postfix_embeds = self.lora_model.get_base_model().model.embed_tokens(postfix_token["input_ids"])
+
+        # 4. Special Token 임베딩
+        visual_start_token_embeds = self.lora_model.get_base_model().model.embed_tokens(
+            torch.tensor([self.visual_start_token_id] * batch_size, device=self.device)
+        ).unsqueeze(1)
+        visual_end_token_embeds = self.lora_model.get_base_model().model.embed_tokens(
+            torch.tensor([self.visual_end_token_id] * batch_size, device=self.device)
+        ).unsqueeze(1)
+
+        # 5. Inference 입력 임베딩
+        if use_postfix:
+            inference_inputs_embeds = torch.cat([
+                prefix_embeds,
+                visual_start_token_embeds,
+                visual_embeds,
+                visual_end_token_embeds,
+                postfix_embeds
+            ], dim=1)
+        else:
+            inference_inputs_embeds = torch.cat([
+                prefix_embeds,
+                visual_start_token_embeds,
+                visual_embeds,
+                visual_end_token_embeds
+            ], dim=1)
+
+        # 6. Inference Attention Mask
+        visual_start_mask = torch.ones(batch_size, 1, dtype=torch.long, device=self.device)
+        visual_end_mask   = torch.ones(batch_size, 1, dtype=torch.long, device=self.device)
+
+        mask_parts = [
+            prefix_token['attention_mask'],          # (B, T_prefix)
+            visual_start_mask,                       # (B, 1)
+            visual_attention_mask,                   # (B, T_video)
+            visual_end_mask                          # (B, 1)
+        ]
+        if use_postfix:
+            mask_parts.append(postfix_token['attention_mask'])  # (B, T_postfix)
+
+        inference_attention_mask = torch.cat(mask_parts, dim=1) # (B, T_total)
+    #     # concat sub-pose feature -> 최종 Visual Embedding
+    #     visual_features = torch.cat(features, dim=-1) + self.part_para.to(self.device) # param도 device 통일
+
+    #     # Transformer Encoder 미사용
+    #     visual_embeds = self.pose_proj(visual_features) # (B, T_video, Gemma_hidden_dim)
+    #     # visual_attention_mask = torch.ones(visual_features.shape[:2], dtype=torch.long, device=visual_features.device)    # 수어 특징 벡터 전체 사용
+    #     visual_attention_mask = src_input['attention_mask'].to(visual_embeds.device)    # 원본 비디오 길이 만큼의 attention mask
+
+    #    # 2. Prefix Embedding 계산
+    #     batch_size = visual_embeds.shape[0]
+    #     prefix_text = [f"Translate sign language video to {self.lang}: "] * batch_size
+    #     # prefix_text = [f"Consider the hand shapes, movements, and facial expressions in the sign language video features. Thinking step-by-step, synthesize this information and translate into {self.lang}:"] * batch_size
+    #     prefix_token = self.gemma_tokenizer(
+    #         prefix_text, padding="longest", truncation=True, return_tensors="pt"
+    #     ).to(self.device) # device 통일
+    #     prefix_embeds = self.lora_model.get_base_model().model.embed_tokens(prefix_token["input_ids"])
+
+    #     # 3. Special Token 임베딩 생성
+    #     visual_start_token_embeds = self.lora_model.get_base_model().model.embed_tokens(
+    #         torch.tensor([self.visual_start_token_id] * batch_size, device=self.device)
+    #     ).unsqueeze(1)
+    #     visual_end_token_embeds = self.lora_model.get_base_model().model.embed_tokens(
+    #         torch.tensor([self.visual_end_token_id] * batch_size, device=self.device)
+    #     ).unsqueeze(1)
+
+    #     # 4. Inference 입력 임베딩: prefix + <visual_start> + visual + <visual_end>
+    #     inference_inputs_embeds = torch.cat([
+    #         prefix_embeds,
+    #         visual_start_token_embeds,
+    #         visual_embeds,
+    #         visual_end_token_embeds
+    #     ], dim=1)
+
+    #     # 5. Inference Attention Mask
+    #     visual_start_mask = torch.ones(batch_size, 1, dtype=torch.long, device=self.device)
+    #     visual_end_mask = torch.ones(batch_size, 1, dtype=torch.long, device=self.device)
+    #     inference_attention_mask = torch.cat([
+    #         prefix_token['attention_mask'],
+    #         visual_start_mask,
+    #         visual_attention_mask, # 원본 비디오 길이 마스크
+    #         visual_end_mask
+    #     ], dim=1)
+
+    #     # inference_attention_mask = src_input['attention_mask']
+    #     # inference_inputs_embeds = src_input['inputs_embeds']
+
+        # generate 호출
+        outputs = self.lora_model.generate(
+            inputs_embeds=inference_inputs_embeds,
+            attention_mask=inference_attention_mask,
+            max_new_tokens=max_new_tokens,
+            num_beams=num_beams,
+            pad_token_id=self.gemma_tokenizer.pad_token_id,
+            eos_token_id=self.gemma_tokenizer.eos_token_id,
+            min_length=1,  # 최소 1 토큰 생성
+            # do_sample=False,
+            # top_k=50,      # 상위 50개 토큰 중 샘플링
+            # top_p=0.95,    # 누적 확률 95% 내에서 샘플링
+        )
+        return outputs
+
+def get_requires_grad_dict(model):
+    param_requires_grad = {name: True for name, param in model.named_parameters()}
+    param_requires_grad_right = {}
+    for key in param_requires_grad.keys():
+        if 'left' in key:
+            param_requires_grad_right[key.replace("left", 'right')] = param_requires_grad[key]
+    param_requires_grad = {**param_requires_grad,
+                           **param_requires_grad_right}
+    params_to_update = {k: v for k, v in model.state_dict().items() if param_requires_grad.get(k, True)}
+
+    return params_to_update
+
+
+
+#CE Loss 이전에 debugging code
         # # --- Debugging: 예측값과 정답 레이블 비교 확인 ---
         # # 특정 조건에서만 출력 (예: global_step % 100 == 0)
         # # global_step = ... # 학습 루프에서 전달 받거나 계산 필요 
@@ -473,152 +801,3 @@ class Uni_Sign(nn.Module):
         #         print(f"\n[!!! 에러 발생 !!!] 예측/정답 비교 중 에러: {e}\n")
         
         # # --- Debugging End ---
-
-        # Loss 계산
-        loss_fct = torch.nn.CrossEntropyLoss(ignore_index=-100)
-
-        # 로짓과 레이블의 길이(T_target-1)가 같은지 확인 후 계산
-        loss_logit_len = target_logits.shape[1]
-        loss_label_len = labels.shape[1]
-
-        if loss_logit_len == 0: # target_logits가 비어있는 경우 처리
-             loss = torch.tensor(0.0, device=all_logits.device, requires_grad=True) # 또는 다른 적절한 처리
-             print("Warning: No target logits found for loss calculation.")
-        elif loss_logit_len != loss_label_len:
-            # 길이가 다르면 작은 쪽에 맞춰서 계산 (잠재적 문제 알림)
-            print(f"Warning: Mismatch in target logits ({loss_logit_len}) and labels ({loss_label_len}) length for loss. Using min length.")
-            min_len_for_loss = min(loss_logit_len, loss_label_len)
-            if min_len_for_loss == 0:
-                 loss = torch.tensor(0.0, device=all_logits.device, requires_grad=True)
-            else:
-                 loss = loss_fct(target_logits[:, :min_len_for_loss, :].reshape(-1, target_logits.size(-1)),
-                                 labels[:, :min_len_for_loss].reshape(-1).long())
-        else:
-            # 길이가 같으면 정상 계산
-            loss = loss_fct(target_logits.reshape(-1, target_logits.size(-1)),
-                            labels.reshape(-1).long())
-
-        stack_out = {
-            'inputs_embeds': training_inputs_embeds,
-            'attention_mask': training_attention_mask,
-            'loss': loss,
-            # 'target_logits': target_logits, # Target 예측에 해당하는 로짓 슬라이스
-            # 'labels': labels              # Loss 계산에 사용된 최종 레이블 (마스킹 적용됨)
-        }
-
-        return stack_out
-
-    @torch.no_grad()
-    def generate(self,
-                 src_input,
-                 max_new_tokens,
-                 num_beams):
-    
-        # 수어 영상 특징 추출, 기존과 동일
-        features = []
-        body_feat = None
-        
-        rgb_support_dict = {}
-        if self.args.rgb_support:
-             for index_key, rgb_key in zip(['left_sampled_indices', 'right_sampled_indices'], ['left_hands', 'right_hands']):
-                  rgb_feat = self.rgb_support_backbone(src_input[rgb_key])
-                  rgb_support_dict[index_key] = src_input[index_key]
-                  rgb_support_dict[rgb_key] = rgb_feat
-    
-        for part in self.modes:
-            proj_feat = self.proj_linear[part](src_input[part]).permute(0,3,1,2) #B,C,T,V
-            gcn_feat = self.gcn_modules[part](proj_feat)
-            if part == 'body':
-                body_feat = gcn_feat
-            else:
-                assert not body_feat is None
-                
-                if part == 'left':
-                     if self.args.rgb_support:
-                         gcn_feat = self.gather_feat_pose_rgb(gcn_feat, rgb_support_dict[f'{part}_hands'], rgb_support_dict[f'{part}_sampled_indices'], src_input[f'{part}_rgb_len'], src_input[f'{part}_skeletons_norm'])
-                     gcn_feat = gcn_feat + body_feat[..., -2][...,None].detach()
-                elif part == 'right':
-                     if self.args.rgb_support:
-                          gcn_feat = self.gather_feat_pose_rgb(gcn_feat, rgb_support_dict[f'{part}_hands'], rgb_support_dict[f'{part}_sampled_indices'], src_input[f'{part}_rgb_len'], src_input[f'{part}_skeletons_norm'])
-                     gcn_feat = gcn_feat + body_feat[..., -1][...,None].detach()
-                elif part == 'face_all':
-                     gcn_feat = gcn_feat + body_feat[..., 0][...,None].detach()
-                else: raise NotImplementedError
-    
-            gcn_feat = self.fusion_gcn_modules[part](gcn_feat) #B,C,T,V
-            pool_feat = gcn_feat.mean(-1).transpose(1,2) #B,T,C
-            features.append(pool_feat)
-    
-        # concat sub-pose feature -> 최종 Visual Embedding
-        visual_features = torch.cat(features, dim=-1) + self.part_para.to(self.device) # param도 device 통일
-
-        # Transformer Encoder 미사용
-        visual_embeds = self.pose_proj(visual_features) # (B, T_video, Gemma_hidden_dim)
-        # visual_attention_mask = torch.ones(visual_features.shape[:2], dtype=torch.long, device=visual_features.device)    # 수어 특징 벡터 전체 사용
-        visual_attention_mask = src_input['attention_mask'].to(visual_embeds.device)    # 원본 비디오 길이 만큼의 attention mask
-
-       # 2. Prefix Embedding 계산
-        batch_size = visual_embeds.shape[0]
-        prefix_text = [f"Translate sign language video to {self.lang}: "] * batch_size
-        # prefix_text = [f"Consider the hand shapes, movements, and facial expressions in the sign language video features. Thinking step-by-step, synthesize this information and translate into {self.lang}:"] * batch_size
-        prefix_token = self.gemma_tokenizer(
-            prefix_text, padding="longest", truncation=True, return_tensors="pt"
-        ).to(self.device) # device 통일
-        prefix_embeds = self.lora_model.get_base_model().model.embed_tokens(prefix_token["input_ids"])
-
-        # 3. Special Token 임베딩 생성
-        visual_start_token_embeds = self.lora_model.get_base_model().model.embed_tokens(
-            torch.tensor([self.visual_start_token_id] * batch_size, device=self.device)
-        ).unsqueeze(1)
-        visual_end_token_embeds = self.lora_model.get_base_model().model.embed_tokens(
-            torch.tensor([self.visual_end_token_id] * batch_size, device=self.device)
-        ).unsqueeze(1)
-
-        # 4. Inference 입력 임베딩: prefix + <visual_start> + visual + <visual_end>
-        inference_inputs_embeds = torch.cat([
-            prefix_embeds,
-            visual_start_token_embeds,
-            visual_embeds,
-            visual_end_token_embeds
-        ], dim=1)
-
-        # 5. Inference Attention Mask
-        visual_start_mask = torch.ones(batch_size, 1, dtype=torch.long, device=self.device)
-        visual_end_mask = torch.ones(batch_size, 1, dtype=torch.long, device=self.device)
-        inference_attention_mask = torch.cat([
-            prefix_token['attention_mask'],
-            visual_start_mask,
-            visual_attention_mask, # 원본 비디오 길이 마스크
-            visual_end_mask
-        ], dim=1)
-
-        # inference_attention_mask = src_input['attention_mask']
-        # inference_inputs_embeds = src_input['inputs_embeds']
-
-        # generate 호출
-        outputs = self.lora_model.generate(
-            inputs_embeds=inference_inputs_embeds,
-            attention_mask=inference_attention_mask,
-            max_new_tokens=max_new_tokens,
-            num_beams=num_beams,
-            pad_token_id=self.gemma_tokenizer.pad_token_id,
-            eos_token_id=self.gemma_tokenizer.eos_token_id,
-            min_length=1,  # 최소 1 토큰 생성
-            # do_sample=False,
-            # top_k=50,      # 상위 50개 토큰 중 샘플링
-            # top_p=0.95,    # 누적 확률 95% 내에서 샘플링
-        )
-        return outputs
-
-def get_requires_grad_dict(model):
-    param_requires_grad = {name: True for name, param in model.named_parameters()}
-    param_requires_grad_right = {}
-    for key in param_requires_grad.keys():
-        if 'left' in key:
-            param_requires_grad_right[key.replace("left", 'right')] = param_requires_grad[key]
-    param_requires_grad = {**param_requires_grad,
-                           **param_requires_grad_right}
-    params_to_update = {k: v for k, v in model.state_dict().items() if param_requires_grad.get(k, True)}
-
-    return params_to_update
-

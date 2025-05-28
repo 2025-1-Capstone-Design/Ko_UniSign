@@ -26,6 +26,9 @@ import json
 import pathlib
 from torchvision import transforms
 from config import rgb_dirs, pose_dirs
+import time
+import cv2
+
 
 # load sub-pose
 def load_part_kp(skeletons, confs, force_ok=False):
@@ -168,11 +171,14 @@ def bbox_4hands(left_keypoints, right_keypoints, hw):
     
     return left_new_box.transpose(1,0), right_new_box.transpose(1,0), box_hw
 
+
+
 def load_support_rgb_dict(tmp, skeletons, confs, full_path, data_transform):
     support_rgb_dict = {}
     
     confs = np.array(confs)
     skeletons = np.array(skeletons) 
+    SAMPLE_SIZE = 0.1
 
     # sample index of low scores
     left_confs_filter = confs[:,0,91:112].mean(-1)
@@ -189,7 +195,7 @@ def load_support_rgb_dict(tmp, skeletons, confs, full_path, data_transform):
         left_weights = np.max(left_confs) - left_confs + 1e-5
         left_probabilities = left_weights / np.sum(left_weights)
         
-        left_sample_size = int(np.ceil(0.1 * len(left_confs_filter_indices)))
+        left_sample_size = int(np.ceil(SAMPLE_SIZE * len(left_confs_filter_indices)))
         
         left_sampled_indices = np.random.choice(left_confs_filter_indices.tolist(), 
                                                 size=left_sample_size, 
@@ -214,7 +220,7 @@ def load_support_rgb_dict(tmp, skeletons, confs, full_path, data_transform):
         right_weights = np.max(right_confs) - right_confs + 1e-5
         right_probabilities = right_weights / np.sum(right_weights)
         
-        right_sample_size = int(np.ceil(0.1 * len(right_confs_filter_indices)))
+        right_sample_size = int(np.ceil(SAMPLE_SIZE * len(right_confs_filter_indices)))
         
         right_sampled_indices = np.random.choice(right_confs_filter_indices.tolist(), 
                                                  size=right_sample_size, 
@@ -298,10 +304,36 @@ def load_support_rgb_dict(tmp, skeletons, confs, full_path, data_transform):
             box = left_new_box[left_idx]
             
             img_draw = np.uint8(copy.deepcopy(img))[box[1]:box[3],box[0]:box[2],:]
-            img_draw = np.pad(img_draw, ((0, max(0, box_hw-img_draw.shape[0])), (0, max(0, box_hw-img_draw.shape[1])), (0, 0)), mode='constant', constant_values=0)
             
-            f_img = Image.fromarray(img_draw).convert('RGB').resize((image_size, image_size))
+            #------- modified ----------------------------------------------------#
+            scratch = np.zeros((box_hw, box_hw, 3), dtype=np.uint8)
+            # inside loop
+            #t1 = time.time()
+            h, w = img_draw.shape[:2]
+            scratch[:h, :w] = img_draw
+            img_draw = scratch          # or just use `scratch`
+            #print("pad", time.time() - t1)
+            # t1 = time.time()
+            # img_draw = np.pad(img_draw, ((0, max(0, box_hw-img_draw.shape[0])), (0, max(0, box_hw-img_draw.shape[1])), (0, 0)), mode='constant', constant_values=0)
+            # print("pad",time.time()-t1)
+            
+            #t1 = time.time()
+            if img_draw.shape[2] == 3:           # already RGB
+                resized = cv2.resize(img_draw, (image_size, image_size),
+                                    interpolation=cv2.INTER_LINEAR)
+            else:                                # came from cv2 with BGR
+                resized = cv2.resize(cv2.cvtColor(img_draw, cv2.COLOR_BGR2RGB),
+                                    (image_size, image_size),
+                                    interpolation=cv2.INTER_LINEAR)
+
+            # if you still need a PIL.Image:
+            f_img = Image.fromarray(resized)
+            #f_img = Image.fromarray(img_draw).convert('RGB').resize((image_size, image_size))
+            #print("convert",time.time()-t1)
+            #------- modified ----------------------------------------------------#
+
             f_img = data_transform(f_img).unsqueeze(0)
+
             left_hands[left_idx] = f_img
             left_idx += 1
             
@@ -309,9 +341,34 @@ def load_support_rgb_dict(tmp, skeletons, confs, full_path, data_transform):
             box = right_new_box[right_idx]
             
             img_draw = np.uint8(copy.deepcopy(img))[box[1]:box[3],box[0]:box[2],:]
-            img_draw = np.pad(img_draw, ((0, max(0, box_hw-img_draw.shape[0])), (0, max(0, box_hw-img_draw.shape[1])), (0, 0)), mode='constant', constant_values=0)
+
+            #------- modified ----------------------------------------------------#
+            scratch = np.zeros((box_hw, box_hw, 3), dtype=np.uint8)
+            # inside loop
+            #t1 = time.time()
+            h, w = img_draw.shape[:2]
+            scratch[:h, :w] = img_draw
+            img_draw = scratch          # or just use `scratch`
+            #print("pad", time.time() - t1)
+            # t1 = time.time()
+            # img_draw = np.pad(img_draw, ((0, max(0, box_hw-img_draw.shape[0])), (0, max(0, box_hw-img_draw.shape[1])), (0, 0)), mode='constant', constant_values=0)
+            # print("pad",time.time()-t1)
             
-            f_img = Image.fromarray(img_draw).convert('RGB').resize((image_size, image_size))
+            #t1 = time.time()
+            if img_draw.shape[2] == 3:           # already RGB
+                resized = cv2.resize(img_draw, (image_size, image_size),
+                                    interpolation=cv2.INTER_LINEAR)
+            else:                                # came from cv2 with BGR
+                resized = cv2.resize(cv2.cvtColor(img_draw, cv2.COLOR_BGR2RGB),
+                                    (image_size, image_size),
+                                    interpolation=cv2.INTER_LINEAR)
+
+            # if you still need a PIL.Image:
+            f_img = Image.fromarray(resized)
+            #f_img = Image.fromarray(img_draw).convert('RGB').resize((image_size, image_size))
+            #print("convert",time.time()-t1)
+            #------- modified ----------------------------------------------------#
+
             f_img = data_transform(f_img).unsqueeze(0)
             right_hands[right_idx] = f_img
             right_idx += 1
@@ -336,7 +393,7 @@ def load_support_rgb_dict(tmp, skeletons, confs, full_path, data_transform):
 
 # use split rgb video for save time
 def load_video_support_rgb(path, tmp):
-    vr = VideoReader(path, num_threads=1, ctx=cpu(0))
+    vr = VideoReader(path, num_threads=1, ctx=cpu(0)) #1
     
     vr.seek(0)
     total_frames = len(vr)  # VideoReader의 총 프레임 수를 len()을 통해 가져옴
@@ -352,14 +409,31 @@ def load_video_support_rgb(path, tmp):
 class Base_Dataset(Dataset.Dataset):
     def collate_fn(self, batch):
         tgt_batch,src_length_batch,name_batch,pose_tmp,gloss_batch = [],[],[],[],[]
+
+
+        #------------------ ADDED --------------------#
+        background_batch = []
+        translated_batch = []
+        #---------------------------------------------#
         
         for name_sample, pose_sample, text, gloss, _ in batch:
             name_batch.append(name_sample)
             pose_tmp.append(pose_sample)
-            tgt_batch.append(text)
+            
+            #------------------ ADDED --------------------#
+            if type(text)==tuple:
+                tgt_batch.append(text[0])
+                background_batch.append(text[1])
+                translated_batch.append(text[2])
+            else:
+                tgt_batch.append(text)
+            #---------------------------------------------#
+                        
             gloss_batch.append(gloss)
 
         src_input = {}
+        src_input['background'] = background_batch
+        src_input['translated'] = translated_batch
 
         keys = pose_tmp[0].keys()
         for key in keys:
@@ -436,6 +510,11 @@ class S2T_Dataset(Base_Dataset):
             self.pose_dir = os.path.join(pose_dirs[args.dataset], phase)
             self.rgb_dir = os.path.join(rgb_dirs[args.dataset], phase)
 
+        elif self.args.task=='SLT':
+            print(f"SLT format Used in {phase} dataset")
+            self.pose_dir = pose_dirs[args.dataset] #no phase
+            self.rgb_dir = rgb_dirs[args.dataset] #no phase
+
         else:
             raise NotImplementedError
 
@@ -459,13 +538,21 @@ class S2T_Dataset(Base_Dataset):
         else:
             gloss = ''
         
+        if sample.get("background")!=None:
+            background = sample['background']
+            translated = sample['translated']
+            text = (text, background, translated) #use tuple format
+        
         name_sample = sample['name']
-        pose_sample, support_rgb_dict = self.load_pose(sample['video_path'])
+        pose_sample, support_rgb_dict = self.load_pose(sample['video_path'], sample['name'])
 
         return name_sample,pose_sample,text, gloss, support_rgb_dict
     
-    def load_pose(self, path):
-        pose = pickle.load(open(os.path.join(self.pose_dir, path.replace(".mp4", '.pkl')), 'rb'))
+    def load_pose(self, path, name):
+        #pose = pickle.load(open(os.path.join(self.pose_dir, path.replace(".mp4", '.pkl')), 'rb'))
+        #print("start pose", time.time())
+        pose = pickle.load(open(os.path.join(self.pose_dir, f"{name}.pkl"), 'rb'))
+        #print("end pose",time.time())
             
         if 'start' in pose.keys():
             assert pose['start'] < pose['end']
@@ -474,7 +561,8 @@ class S2T_Dataset(Base_Dataset):
         else:
             duration = len(pose['scores'])
             start = 0
-                
+
+        #print("duration",duration)
         if duration > self.max_length:
             tmp = sorted(random.sample(range(duration), k=self.max_length))
         else:
@@ -499,7 +587,7 @@ class S2T_Dataset(Base_Dataset):
         if self.rgb_support:
             full_path = os.path.join(self.rgb_dir, path)
             support_rgb_dict = load_support_rgb_dict(tmp, skeletons, confs, full_path, self.data_transform)
-            
+
         return kps_with_scores, support_rgb_dict
 
     def __str__(self):

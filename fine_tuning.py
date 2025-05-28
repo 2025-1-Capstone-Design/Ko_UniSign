@@ -16,7 +16,7 @@ from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import DataLoader
 from models import Uni_Sign
 import utils as utils
-from datasets import S2T_Dataset
+from datasets_ours import S2T_Dataset
 import os
 import time
 import argparse, json, datetime
@@ -183,6 +183,7 @@ def main(args):
         if args.distributed:
             train_sampler.set_epoch(epoch)
         
+        print(f"epoch {epoch}")
         train_stats = train_one_epoch(args, model, train_dataloader, optimizer, epoch)
 
         # --- 3. Log training metrics to wandb (Main Process Only) ---
@@ -365,7 +366,7 @@ def main(args):
 
 def train_one_epoch(args, model, data_loader, optimizer, epoch):
     model.train()
-
+    
     metric_logger = utils.MetricLogger(delimiter="  ")
     metric_logger.add_meter('lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
     header = 'Epoch: [{}/{}]'.format(epoch, args.epochs)
@@ -385,7 +386,6 @@ def train_one_epoch(args, model, data_loader, optimizer, epoch):
         if args.task == "CSLR":
             tgt_input['gt_sentence'] = tgt_input['gt_gloss']
         stack_out = model(src_input, tgt_input)
-        
         total_loss = stack_out['loss']
         model.backward(total_loss)
         model.step()
@@ -398,6 +398,9 @@ def train_one_epoch(args, model, data_loader, optimizer, epoch):
         metric_logger.update(loss=loss_value)
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
 
+        # if step==30:
+        #     break
+        
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
     print("Averaged stats:", metric_logger)

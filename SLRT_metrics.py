@@ -267,6 +267,19 @@ def sableu(references, hypotheses, tokenizer):
         
     return scores
 
+import sys
+import os
+
+#======================== For Conflict ===========================#
+#from evaluate import load
+#import os
+#import pandas as pd
+#print("loading bluert...")
+#_bleurt = load("bleurt", module_type="metric", device='cpu')
+#=================================================================#
+import pandas as pd
+
+JSON_CNT = 0
 def translation_performance(txt_ref, txt_hyp):
     from rouge import Rouge as SLT_Rouge
     rouge=SLT_Rouge()
@@ -283,12 +296,32 @@ def translation_performance(txt_ref, txt_hyp):
     print(sableu_dict)
     print(f"Rough: {scores['rouge-l']['f']:.2f}")
    
+   
+    #bluert_scores = _bleurt.compute(predictions=txt_hyp, references=txt_ref)['scores']
+    #avg_bleurt = float(sum(bluert_scores) / len(bluert_scores))
+    #sableu_dict['BLUERT'] = avg_bleurt
+    #print(f"BLEURT: {avg_bleurt:.4f}")
+
+    out_dir = "QA_output"
+    os.makedirs(out_dir, exist_ok=True)
+
+    df = pd.DataFrame({
+        "Prediction":   txt_hyp,
+        "Answer":  txt_ref,
+        #"BLEURT":     bluert_scores
+    })
+    global JSON_CNT
+    out_path = os.path.join(out_dir, f"{JSON_CNT:02d}.tsv")
+    df.to_csv(out_path, sep="\t", index=False)
+    JSON_CNT+=1
+    
     # res = []
     # for n in range(4):
     #     res.append(f"{sableu_dict['bleu' + str(n + 1)]:.2f}")
     # res.append(f"{scores['rouge-l']['f']:.2f}")
     
     # print(" & ".join(res))
+    
 
     return sableu_dict, float(scores['rouge-l']['f'])
 

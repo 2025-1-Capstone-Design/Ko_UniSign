@@ -500,7 +500,7 @@ def get_args_parser():
                         help='path where to save, empty for no saving')
     parser.add_argument('--seed', default=42, type=int)
     parser.add_argument('--eval', action='store_true', help='Perform evaluation only')
-    parser.add_argument('--num_workers', default=8, type=int)    # 8
+    parser.add_argument('--num_workers', default=24, type=int)    # 8
     parser.add_argument('--pin-mem', action='store_true',
                         help='Pin CPU memory in DataLoader for more efficient (sometimes) transfer to GPU.')
     parser.add_argument('--no-pin-mem', action='store_false', dest='pin_mem',
@@ -539,7 +539,7 @@ def get_args_parser():
     parser.add_argument("--max_length", default=256, type=int)
     
     # select dataset
-    parser.add_argument("--dataset", default="CSL_Daily", choices=['CSL_News', "CSL_Daily", "WLASL"])
+    parser.add_argument("--dataset", default="CSL_Daily", choices=['CSL_News', "CSL_Daily", "WLASL","OpenASL","OpenASL_QA"])
     
     # select task
     parser.add_argument("--task", default="SLT", choices=['SLT', "ISLR", "CSLR"])
@@ -554,3 +554,5 @@ def get_args_parser():
     parser.add_argument('--wandb_online', action='store_true', help='Enable online Weights & Biases logging')
     
     return parser
+
+#원래 transformers 4.40
